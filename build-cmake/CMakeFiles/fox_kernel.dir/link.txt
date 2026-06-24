@@ -1,0 +1,2 @@
+C:\MinGW\bin\ar.exe qc libfox_kernel.a CMakeFiles/fox_kernel.dir/src/kernel/ai_kernel.cpp.obj CMakeFiles/fox_kernel.dir/src/kernel/command_router.cpp.obj CMakeFiles/fox_kernel.dir/src/kernel/foundation_driver.cpp.obj
+C:\MinGW\bin\ranlib.exe libfox_kernel.a

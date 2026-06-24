@@ -1,0 +1,50 @@
+[
+{
+  "directory": "C:/Users/TECHCOM/Desktop/Port/build",
+  "command": "C:\\MinGW\\bin\\c++.exe  @CMakeFiles\\fox_kernel.dir\\includes_CXX.rsp -std=c++11 -Wall -Wextra -Wpedantic -o CMakeFiles\\fox_kernel.dir\\src\\kernel\\ai_kernel.cpp.obj -c C:\\Users\\TECHCOM\\Desktop\\Port\\src\\kernel\\ai_kernel.cpp",
+  "file": "C:/Users/TECHCOM/Desktop/Port/src/kernel/ai_kernel.cpp",
+  "output": "CMakeFiles/fox_kernel.dir/src/kernel/ai_kernel.cpp.obj"
+},
+{
+  "directory": "C:/Users/TECHCOM/Desktop/Port/build",
+  "command": "C:\\MinGW\\bin\\c++.exe  @CMakeFiles\\fox_kernel.dir\\includes_CXX.rsp -std=c++11 -Wall -Wextra -Wpedantic -o CMakeFiles\\fox_kernel.dir\\src\\kernel\\ai_client.cpp.obj -c C:\\Users\\TECHCOM\\Desktop\\Port\\src\\kernel\\ai_client.cpp",
+  "file": "C:/Users/TECHCOM/Desktop/Port/src/kernel/ai_client.cpp",
+  "output": "CMakeFiles/fox_kernel.dir/src/kernel/ai_client.cpp.obj"
+},
+{
+  "directory": "C:/Users/TECHCOM/Desktop/Port/build",
+  "command": "C:\\MinGW\\bin\\c++.exe  @CMakeFiles\\fox_kernel.dir\\includes_CXX.rsp -std=c++11 -Wall -Wextra -Wpedantic -o CMakeFiles\\fox_kernel.dir\\src\\kernel\\command_router.cpp.obj -c C:\\Users\\TECHCOM\\Desktop\\Port\\src\\kernel\\command_router.cpp",
+  "file": "C:/Users/TECHCOM/Desktop/Port/src/kernel/command_router.cpp",
+  "output": "CMakeFiles/fox_kernel.dir/src/kernel/command_router.cpp.obj"
+},
+{
+  "directory": "C:/Users/TECHCOM/Desktop/Port/build",
+  "command": "C:\\MinGW\\bin\\c++.exe  @CMakeFiles\\fox_kernel.dir\\includes_CXX.rsp -std=c++11 -Wall -Wextra -Wpedantic -o CMakeFiles\\fox_kernel.dir\\src\\kernel\\foundation_driver.cpp.obj -c C:\\Users\\TECHCOM\\Desktop\\Port\\src\\kernel\\foundation_driver.cpp",
+  "file": "C:/Users/TECHCOM/Desktop/Port/src/kernel/foundation_driver.cpp",
+  "output": "CMakeFiles/fox_kernel.dir/src/kernel/foundation_driver.cpp.obj"
+},
+{
+  "directory": "C:/Users/TECHCOM/Desktop/Port/build",
+  "command": "C:\\MinGW\\bin\\c++.exe  @CMakeFiles\\fox_kernel.dir\\includes_CXX.rsp -std=c++11 -Wall -Wextra -Wpedantic -o CMakeFiles\\fox_kernel.dir\\src\\kernel\\sandbox.cpp.obj -c C:\\Users\\TECHCOM\\Desktop\\Port\\src\\kernel\\sandbox.cpp",
+  "file": "C:/Users/TECHCOM/Desktop/Port/src/kernel/sandbox.cpp",
+  "output": "CMakeFiles/fox_kernel.dir/src/kernel/sandbox.cpp.obj"
+},
+{
+  "directory": "C:/Users/TECHCOM/Desktop/Port/build",
+  "command": "C:\\MinGW\\bin\\c++.exe  @CMakeFiles\\fox-terminal.dir\\includes_CXX.rsp -std=c++11 -Wall -Wextra -Wpedantic -o CMakeFiles\\fox-terminal.dir\\src\\terminal\\main.cpp.obj -c C:\\Users\\TECHCOM\\Desktop\\Port\\src\\terminal\\main.cpp",
+  "file": "C:/Users/TECHCOM/Desktop/Port/src/terminal/main.cpp",
+  "output": "CMakeFiles/fox-terminal.dir/src/terminal/main.cpp.obj"
+},
+{
+  "directory": "C:/Users/TECHCOM/Desktop/Port/build",
+  "command": "C:\\MinGW\\bin\\c++.exe  @CMakeFiles\\port-desktop.dir\\includes_CXX.rsp -std=c++11 -Wall -Wextra -Wpedantic -o CMakeFiles\\port-desktop.dir\\src\\desktop\\main.cpp.obj -c C:\\Users\\TECHCOM\\Desktop\\Port\\src\\desktop\\main.cpp",
+  "file": "C:/Users/TECHCOM/Desktop/Port/src/desktop/main.cpp",
+  "output": "CMakeFiles/port-desktop.dir/src/desktop/main.cpp.obj"
+},
+{
+  "directory": "C:/Users/TECHCOM/Desktop/Port/build",
+  "command": "C:\\MinGW\\bin\\c++.exe  @CMakeFiles\\port-tests.dir\\includes_CXX.rsp -std=c++11 -Wall -Wextra -Wpedantic -o CMakeFiles\\port-tests.dir\\src\\tests\\main.cpp.obj -c C:\\Users\\TECHCOM\\Desktop\\Port\\src\\tests\\main.cpp",
+  "file": "C:/Users/TECHCOM/Desktop/Port/src/tests/main.cpp",
+  "output": "CMakeFiles/port-tests.dir/src/tests/main.cpp.obj"
+}
+]

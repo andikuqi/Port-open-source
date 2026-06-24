@@ -1,0 +1,3 @@
+"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\port-desktop.dir/objects.a
+C:\MinGW\bin\ar.exe qc CMakeFiles\port-desktop.dir/objects.a @CMakeFiles\port-desktop.dir\objects1.rsp
+C:\MinGW\bin\g++.exe -mwindows -Wl,--whole-archive CMakeFiles\port-desktop.dir/objects.a -Wl,--no-whole-archive -o port-desktop.exe -Wl,--out-implib,libport-desktop.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\port-desktop.dir\linkLibs.rsp
