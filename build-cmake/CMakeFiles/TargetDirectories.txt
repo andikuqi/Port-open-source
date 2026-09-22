@@ -1,5 +1,0 @@
-C:/Users/TECHCOM/Desktop/Ansk/build-cmake/CMakeFiles/fox_kernel.dir
-C:/Users/TECHCOM/Desktop/Ansk/build-cmake/CMakeFiles/fox-terminal.dir
-C:/Users/TECHCOM/Desktop/Ansk/build-cmake/CMakeFiles/port-desktop.dir
-C:/Users/TECHCOM/Desktop/Ansk/build-cmake/CMakeFiles/edit_cache.dir
-C:/Users/TECHCOM/Desktop/Ansk/build-cmake/CMakeFiles/rebuild_cache.dir

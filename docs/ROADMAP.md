@@ -1,43 +1,30 @@
 # Port OS Roadmap
 
-## Milestone 1: Virtual Kernel Skeleton
+## Completed foundation
 
-- Create a C/C++ project structure.
-- Build FOX-terminal as a command-line app.
-- Add an AI Kernel interface.
-- Add command parsing for `help`, `status`, `ask`, and `exit`.
-- Add `/port ans-install-fd` as the first foundation setup command.
-- Add Port Desktop as the first graphical virtual environment.
-- Document the architecture.
+- C++23 layered kernel and native desktop.
+- Sandboxed filesystem with Trash Bin and audit log.
+- Structured command plans and approval gates.
+- Gemini provider, context engine, offline fallback, and asynchronous UI flow.
+- Session history and automated kernel/security/AI tests.
 
-## Milestone 2: Sandboxed Workspace
+## Next: desktop stabilization
 
-- Add a sandbox directory.
-- Add safe file read/write/list operations.
-- Log every operation requested by the AI kernel.
-- Require confirmation for destructive actions.
+- Split the large desktop source into focused UI modules.
+- Add automated Win32 interaction tests for selection, drag, DPI, and resize.
+- Add cancellation and visible timeout/error details for AI requests.
+- Embed or install image assets instead of relying on the working directory.
 
-## Milestone 3: AI Planning Layer
+## Next: controlled tools
 
-- Connect an AI model provider.
-- Convert user prompts into structured task plans.
-- Add approval gates for commands.
-- Add persistent session history.
+- Replace URLMon downloads with a cancellable client and progress reporting.
+- Add signed/hash-verified package manifests.
+- Add a configurable program allowlist and stronger process isolation.
+- Add provider integration tests against a local mock HTTP server.
 
-## Milestone 4: Network Tools
+## Later research
 
-- Add controlled web search.
-- Add controlled file downloads.
-- Add source citation logs.
-
-## Milestone 5: VM Integration
-
-- Evaluate QEMU and VirtualBox backends.
-- Boot a minimal guest environment.
-- Route FOX-terminal operations into the guest sandbox.
-
-## Milestone 6: Real Kernel Research
-
-- Decide whether the real kernel path should use C, C++, Rust, or a hybrid.
-- Build bootloader experiments.
-- Build minimal memory, process, and driver prototypes.
+- Evaluate a QEMU or Hyper-V guest backend.
+- Route high-risk execution into the guest environment.
+- Research bootloader and bare-metal kernel experiments separately from the
+  Windows virtual desktop product.

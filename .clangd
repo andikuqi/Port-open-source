@@ -1,17 +1,16 @@
 CompileFlags:
-  Compiler: C:/MinGW/bin/c++.exe
+  Compiler: C:/msys64/mingw64/bin/c++.exe
+  CompilationDatabase: C:/Users/TECHCOM/Desktop/Port/build-msys
   Add:
     - -IC:/Users/TECHCOM/Desktop/Port/include
-    - -IC:/MinGW/lib/gcc/mingw32/6.3.0/include/c++
-    - -IC:/MinGW/lib/gcc/mingw32/6.3.0/include/c++/mingw32
-    - -IC:/MinGW/lib/gcc/mingw32/6.3.0/include/c++/backward
-    - -IC:/MinGW/lib/gcc/mingw32/6.3.0/include
-    - -IC:/MinGW/include
-    - -std=c++11
+    - -std=c++23
     - -D_WIN32
     - -DWIN32
     - -DNOMINMAX
-    - -D_GLIBCXX_USE_FLOAT128=0
+    - -D_WIN32_WINNT=0x0601
 
 Diagnostics:
   UnusedIncludes: None
+
+Index:
+  Background: Build

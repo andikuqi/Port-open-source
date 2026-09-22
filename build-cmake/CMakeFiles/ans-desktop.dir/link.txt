@@ -1,3 +1,0 @@
-"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\ans-desktop.dir/objects.a
-C:\MinGW\bin\ar.exe qc CMakeFiles\ans-desktop.dir/objects.a @CMakeFiles\ans-desktop.dir\objects1.rsp
-C:\MinGW\bin\g++.exe -mwindows -Wl,--whole-archive CMakeFiles\ans-desktop.dir/objects.a -Wl,--no-whole-archive -o ans-desktop.exe -Wl,--out-implib,libans-desktop.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\ans-desktop.dir\linkLibs.rsp

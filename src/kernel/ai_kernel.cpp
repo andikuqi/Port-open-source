@@ -1,405 +1,459 @@
-#include "fox/ai_kernel.hpp"
-#include "fox/command_router.hpp"
+#include "port/kernel/ai_kernel.hpp"
+#include "port/kernel/command_router.hpp"
+#include "port/kernel/foundation_driver.hpp"
+#include "port/security/audit_log.hpp"
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <shellapi.h>
+#include <urlmon.h>
 #endif
 
 #include <algorithm>
 #include <cctype>
-#include <ctime>
-#include <fstream>
 #include <sstream>
-#include <cstdlib>
 
-namespace fox {
+namespace port::kernel {
 
 namespace {
 
-// Split a multi-line plan string into individual command lines.
-std::vector<std::string> splitLines(const std::string &text) {
-  std::vector<std::string> lines;
-  std::istringstream stream(text);
-  std::string line;
-  while (std::getline(stream, line)) {
-    // Trim
-    while (!line.empty() &&
-           std::isspace(static_cast<unsigned char>(line.front())))
-      line.erase(line.begin());
-    while (!line.empty() &&
-           std::isspace(static_cast<unsigned char>(line.back())))
-      line.pop_back();
-    if (!line.empty()) {
-      lines.push_back(line);
-    }
-  }
-  return lines;
+std::filesystem::path sandboxRelativePath(std::string value) {
+    std::replace(value.begin(), value.end(), '\\', '/');
+    if (value.rfind("sandbox/", 0) == 0) value.erase(0, 8);
+    if (value == "sandbox") value.clear();
+    return std::filesystem::path{value};
 }
 
-bool isDestructive(CommandType type) {
-  return type == CommandType::FsWrite || type == CommandType::FsDelete;
+bool isHttpsUrl(const std::string& value) {
+    return value.rfind("https://", 0) == 0 &&
+           value.find_first_of("\r\n") == std::string::npos;
 }
 
 } // namespace
 
-AIKernel::AIKernel()
-    : running_(false), sandbox_("sandbox"), activePlan_{{}, 0, "", false} {}
+// ---------- AIKernel ----------
+
+AIKernel::AIKernel(Config config)
+    : config_{std::move(config)}
+    , sandbox_{config_.sandboxPath}
+    , sessionStore_{std::make_unique<port::storage::SessionStore>(config_.sessionLogPath)}
+    , drivers_{std::make_unique<FoundationDriverRegistry>()}
+{
+    port::security::AuditLog::instance().open(config_.auditLogPath);
+}
+
+AIKernel::~AIKernel() {
+    if (running_) shutdown();
+}
+
+void AIKernel::setAIAdapter(std::shared_ptr<IAIAdapter> adapter) {
+    aiAdapter_ = std::move(adapter);
+}
+
+void AIKernel::log(std::string_view tag, std::string_view content) {
+    sessionStore_->append(tag, content);
+}
 
 KernelResponse AIKernel::boot() {
-  if (running_) {
-    return {true, "AI Kernel is already running."};
-  }
-
-  running_ = true;
-  sandbox_.createSandboxDir();
-  logSession("[BOOT] AI Kernel booted.");
-  return {true, "AI Kernel booted successfully."};
+    if (running_) return {true, "AI Kernel is already running."};
+    running_ = true;
+    sandbox_.initialize();
+    log("BOOT", "AI Kernel booted.");
+    port::security::AuditLog::instance().record(
+        port::security::AuditAction::KernelBoot, "port-os", true);
+    return {true, "AI Kernel booted successfully."};
 }
 
 KernelResponse AIKernel::shutdown() {
-  if (!running_) {
-    return {true, "AI Kernel is already stopped."};
-  }
-
-  running_ = false;
-  logSession("[SHUTDOWN] AI Kernel stopped.");
-  return {true, "AI Kernel stopped."};
+    if (!running_) return {true, "AI Kernel is already stopped."};
+    running_ = false;
+    log("SHUTDOWN", "AI Kernel stopped.");
+    port::security::AuditLog::instance().record(
+        port::security::AuditAction::KernelShutdown, "port-os", true);
+    return {true, "AI Kernel stopped."};
 }
 
-void AIKernel::logSession(const std::string &logText) const {
-  std::ofstream logFile("session_history.txt", std::ios::app);
-  if (!logFile)
-    return;
+bool AIKernel::isRunning() const noexcept { return running_; }
 
-  time_t now = time(nullptr);
-  char timeStr[64];
-  struct tm *timeInfo = localtime(&now);
-  if (timeInfo) {
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeInfo);
-    logFile << "[" << timeStr << "] " << logText << "\n";
-  }
+port::security::Sandbox& AIKernel::getSandbox() noexcept { return sandbox_; }
+const port::security::Sandbox& AIKernel::getSandbox() const noexcept { return sandbox_; }
+
+std::string AIKernel::status() const {
+    std::ostringstream oss;
+    oss << "Port OS - Super-Nova 2.0\n"
+        << "  AI Kernel  : " << (running_ ? "running" : "stopped") << '\n'
+        << "  Foundation : " << drivers_->summary() << '\n'
+        << "  Sandbox    : " << sandbox_.root().string() << '\n'
+        << "  AI Planner : "
+        << (activePlan_.active
+               ? "active (" + std::to_string(activePlan_.steps.size()) + " steps)"
+               : "idle")
+        << '\n'
+        << "  Engine     : Super-Nova 2.0\n"
+        << "  AI Provider: " << (aiAdapter_ ? "connected" : "offline fallback");
+    return oss.str();
 }
 
-KernelResponse AIKernel::executeStep() {
-  if (!activePlan_.active ||
-      activePlan_.currentStep >= activePlan_.steps.size()) {
-    activePlan_.active = false;
-    return {true, "Plan completed."};
-  }
-
-  TaskStep &step = activePlan_.steps[activePlan_.currentStep];
-  KernelResponse response = handleCommand(step.command);
-  logSession("[PLAN STEP " + std::to_string(activePlan_.currentStep + 1) + "/" +
-             std::to_string(activePlan_.steps.size()) + "] " +
-             step.command.rawText + " -> " + response.message);
-
-  activePlan_.currentStep++;
-
-  if (activePlan_.currentStep >= activePlan_.steps.size()) {
-    activePlan_.active = false;
-    return {response.ok,
-            response.message + "\n\nPlan complete. All steps executed."};
-  }
-
-  // Check if the next step needs confirmation.
-  TaskStep &nextStep = activePlan_.steps[activePlan_.currentStep];
-  if (isDestructive(nextStep.command.type)) {
-    std::ostringstream msg;
-    msg << response.message << "\n\n";
-    msg << "Step " << (activePlan_.currentStep + 1) << "/"
-        << activePlan_.steps.size() << ":\n";
-    msg << "  PLAN_CONFIRM_REQUIRED: " << nextStep.command.rawText << "\n";
-    msg << "Type 'plan proceed' to continue or 'plan abort' to cancel.";
-    return {true, msg.str()};
-  }
-
-  // Auto-execute next non-destructive step.
-  return executeStep();
-}
-
-KernelResponse AIKernel::handleCommand(const Command &command) {
-  if (!running_ && command.type != CommandType::Exit) {
-    return {false, "AI Kernel is not running."};
-  }
-
-  switch (command.type) {
-  case CommandType::Help:
-    return {
-        true,
-        "Port OS - Super-Nova 1.0 AI Kernel\n"
-        "Available commands:\n"
-        "  help                     Show this help message\n"
-        "  status                   Show kernel status\n"
-        "  fs list [path]           List files in sandbox (alias: ls)\n"
-        "  fs read <file>           Read a file (alias: cat)\n"
-        "  fs write <file> <text>   Write content to a file\n"
-        "  fs delete <file>         Delete a file (moves to Trash)\n"
-        "  fs mkdir <dir>           Create a new directory\n"
-        "  fs rename <old> <new>    Rename a file or folder\n"
-        "  fs trash                 List files in the Trash Bin\n"
-        "  fs empty-trash           Permanently empty the Trash Bin\n"
-        "  net download <url> <dst> Download a file from the internet\n"
-        "  sys execute <path> [arg] Execute a program\n"
-        "  plan proceed             Approve the next plan step\n"
-        "  plan abort               Cancel the current AI plan\n"
-        "  exit                     Shut down Port OS\n"
-        "\nOr just type anything naturally — Super-Nova 1.0 will understand."};
-
-  case CommandType::Status:
-    return {true, status()};
-
-  case CommandType::FoundationInstall:
-    foundationDrivers_.installAll();
-    logSession("[CMD] /port ans-install-fd");
-    return {
-        true,
-        "Port foundation installer completed.\n"
-        "\n"
-        "Installed virtual foundation drivers:\n" +
-            foundationDrivers_.detailedReport() +
-            "\n"
-            "These are Port virtual drivers, not host Windows kernel drivers.\n"
-            "Next milestone: bind each driver to real sandbox checks and local "
-            "tool detection."};
-
-  case CommandType::Prompt: {
-    const std::string &prompt = command.rawText;
-    logSession("[ASK] " + prompt);
-
-    std::string plan = aiClient_.requestPlan(prompt);
-    logSession("[AI PLAN]\n" + plan);
-
-    if (plan.empty() || plan == "unknown") {
-      return {false, "AI could not generate a plan for: " + prompt};
-    }
-
-    std::vector<std::string> lines = splitLines(plan);
-    if (lines.empty()) {
-      return {false, "AI returned an empty plan."};
-    }
-
-    // Build new active plan from parsed steps.
-    activePlan_.steps.clear();
-    activePlan_.currentStep = 0;
+void AIKernel::buildPlan(const std::string& prompt, const std::string& planText) {
+    activePlan_ = {};
     activePlan_.prompt = prompt;
     activePlan_.active = true;
 
     CommandRouter router;
-    for (const auto &line : lines) {
-      TaskStep step;
-      step.command = router.parse(line);
-      step.approved = !isDestructive(step.command.type);
-      activePlan_.steps.push_back(step);
+    std::istringstream ss{planText};
+    std::string line;
+    while (std::getline(ss, line)) {
+        while (!line.empty() && std::isspace(static_cast<unsigned char>(line.front())))
+            line.erase(line.begin());
+        while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back())))
+            line.pop_back();
+        if (line.empty() || line == "unknown") continue;
+        TaskStep step;
+        step.command  = router.parse(line);
+        step.approved = !isDestructive(step.command.type);
+        activePlan_.steps.push_back(std::move(step));
     }
-
-    std::ostringstream msg;
-    msg << "AI generated a plan with " << activePlan_.steps.size()
-        << " step(s):\n";
-    for (std::size_t i = 0; i < activePlan_.steps.size(); ++i) {
-      msg << "  " << (i + 1) << ". " << activePlan_.steps[i].command.rawText
-          << "\n";
-    }
-
-    // Execute until the first destructive step or end.
-    TaskStep &first = activePlan_.steps[0];
-    if (isDestructive(first.command.type)) {
-      msg << "\nStep 1/" << activePlan_.steps.size() << ":\n";
-      msg << "  PLAN_CONFIRM_REQUIRED: " << first.command.rawText << "\n";
-      msg << "Type 'plan proceed' to continue or 'plan abort' to cancel.";
-      return {true, msg.str()};
-    }
-
-    KernelResponse stepResult = executeStep();
-    msg << "\n" << stepResult.message;
-    return {stepResult.ok, msg.str()};
-  }
-
-  case CommandType::PlanProceed:
-    if (!activePlan_.active) {
-      return {false, "No active plan to proceed with."};
-    }
-    logSession("[PLAN PROCEED]");
-    return executeStep();
-
-  case CommandType::PlanAbort:
-    if (!activePlan_.active) {
-      return {false, "No active plan to abort."};
-    }
-    activePlan_.active = false;
-    logSession("[PLAN ABORTED]");
-    return {true, "Plan aborted."};
-
-  case CommandType::FsList: {
-    bool ok = false;
-    std::string listMsg = sandbox_.list(command.arg1, ok);
-    return {ok, listMsg};
-  }
-  case CommandType::FsRead: {
-    bool ok = false;
-    std::string content = sandbox_.read(command.arg1, ok);
-    return {ok, content};
-  }
-  case CommandType::FsWrite: {
-    if (command.arg1.empty()) {
-      return {false, "Error: Write command requires a filename."};
-    }
-    bool ok = sandbox_.write(command.arg1, command.arg2);
-    if (ok) {
-      return {true, "File '" + command.arg1 + "' written successfully."};
-    } else {
-      return {false, "Error: Failed to write to file '" + command.arg1 + "'."};
-    }
-  }
-  case CommandType::FsDelete: {
-    if (command.arg1.empty()) {
-      return {false, "Error: Delete command requires a filename."};
-    }
-    if (command.arg2 == "yes") {
-      bool success = sandbox_.deleteFile(command.arg1);
-      if (success) {
-        return {true, "File '" + command.arg1 + "' moved to Trash Bin."};
-      } else {
-        return {false, "Error: Failed to delete file '" + command.arg1 + "'."};
-      }
-    }
-    return {true, "CONFIRM_REQUIRED: " + command.arg1};
-  }
-  case CommandType::FsMakeDir: {
-    if (command.arg1.empty()) {
-      return {false, "Error: mkdir requires a directory name."};
-    }
-    bool ok = sandbox_.makeDir(command.arg1);
-    if (ok) {
-      return {true, "Directory '" + command.arg1 + "' created."};
-    } else {
-      return {false, "Error: Failed to create directory '" + command.arg1 + "'."};
-    }
-  }
-  case CommandType::FsRename: {
-    if (command.arg1.empty() || command.arg2.empty()) {
-      return {false, "Error: rename requires old and new names."};
-    }
-    bool ok = sandbox_.renameEntry(command.arg1, command.arg2);
-    if (ok) {
-      return {true, "Renamed '" + command.arg1 + "' to '" + command.arg2 + "'."};
-    } else {
-      return {false, "Error: Failed to rename '" + command.arg1 + "'."};
-    }
-  }
-  case CommandType::NetDownload: {
-    if (command.arg1.empty() || command.arg2.empty()) {
-      return {false, "Error: net download requires URL and destination path."};
-    }
-
-    // Auto-create destination directory if it doesn't exist to prevent URLDownloadToFile failures
-    std::string dest = command.arg2;
-    std::size_t lastSlash = dest.find_last_of("/\\");
-    if (lastSlash != std::string::npos) {
-        std::string dirPath = dest.substr(0, lastSlash);
-        // Strip sandbox prefix if present since sandbox_.makeDir prepends it
-        if (dirPath.rfind("sandbox/", 0) == 0) {
-            dirPath = dirPath.substr(8);
-        } else if (dirPath.rfind("sandbox\\", 0) == 0) {
-            dirPath = dirPath.substr(8);
-        } else if (dirPath == "sandbox") {
-            dirPath = "";
-        }
-        if (!dirPath.empty()) {
-            sandbox_.makeDir(dirPath);
-        }
-    }
-#ifdef _WIN32
-    HMODULE hUrlmon = LoadLibraryA("urlmon.dll");
-    if (hUrlmon) {
-      typedef HRESULT(WINAPI* URLDownloadToFileA_t)(LPUNKNOWN, LPCSTR, LPCSTR, DWORD, LPVOID);
-      URLDownloadToFileA_t fnURLDownloadToFileA = reinterpret_cast<URLDownloadToFileA_t>(GetProcAddress(hUrlmon, "URLDownloadToFileA"));
-      if (fnURLDownloadToFileA) {
-        HRESULT hr = fnURLDownloadToFileA(nullptr, command.arg1.c_str(), command.arg2.c_str(), 0, nullptr);
-        FreeLibrary(hUrlmon);
-        if (hr == S_OK) {
-          return {true, "Successfully downloaded " + command.arg1 + " to " + command.arg2};
-        } else {
-          return {false, "Error: Download failed with HRESULT " + std::to_string(hr)};
-        }
-      }
-      FreeLibrary(hUrlmon);
-    }
-    return {false, "Error: Failed to load urlmon.dll or locate URLDownloadToFileA"};
-#else
-    std::string sysCmd = "curl -L -o \"" + command.arg2 + "\" \"" + command.arg1 + "\"";
-    int ret = std::system(sysCmd.c_str());
-    if (ret == 0) {
-      return {true, "Successfully downloaded " + command.arg1 + " to " + command.arg2};
-    } else {
-      return {false, "Error: curl download failed with exit code " + std::to_string(ret)};
-    }
-#endif
-  }
-  case CommandType::SysExecute: {
-    if (command.arg1.empty()) {
-      return {false, "Error: sys execute requires program path."};
-    }
-#ifdef _WIN32
-    HINSTANCE hInst = ShellExecuteA(nullptr, "open", command.arg1.c_str(), command.arg2.c_str(), nullptr, SW_SHOWNORMAL);
-    if (reinterpret_cast<INT_PTR>(hInst) > 32) {
-      return {true, "Successfully executed " + command.arg1 + " " + command.arg2};
-    } else {
-      return {false, "Error: ShellExecute failed with code " + std::to_string(reinterpret_cast<INT_PTR>(hInst))};
-    }
-#else
-    std::string chmodCmd = "chmod +x \"" + command.arg1 + "\"";
-    std::system(chmodCmd.c_str());
-    std::string sysCmd = "\"" + command.arg1 + "\" " + command.arg2;
-    int ret = std::system(sysCmd.c_str());
-    if (ret == 0) {
-      return {true, "Successfully executed " + command.arg1 + " " + command.arg2};
-    } else {
-      return {false, "Error: execution failed with exit code " + std::to_string(ret)};
-    }
-#endif
-  }
-  case CommandType::Exit:
-    return shutdown();
-  case CommandType::Unknown: {
-    // Check for inline trash commands.
-    std::string raw = command.rawText;
-    std::transform(raw.begin(), raw.end(), raw.begin(), ::tolower);
-    if (raw == "fs trash" || raw == "fs list-trash") {
-      bool ok = false;
-      return {ok, sandbox_.listTrash(ok)};
-    }
-    if (raw == "fs empty-trash") {
-      bool ok = sandbox_.emptyTrash();
-      return {ok, ok ? "Trash Bin emptied successfully."
-                     : "Failed to empty Trash Bin."};
-    }
-    return {false, "Unknown command. Type 'help' to see available commands."};
-  }
-  }
-
-  return {false, "Unhandled command."};
 }
 
-bool AIKernel::isRunning() const { return running_; }
+KernelResponse AIKernel::executeNextStep() {
+    if (!activePlan_.active || activePlan_.currentStep >= activePlan_.steps.size()) {
+        activePlan_.active = false;
+        return {true, "Plan completed."};
+    }
 
-fox::Sandbox &AIKernel::getSandbox() { return sandbox_; }
+    auto& step = activePlan_.steps[activePlan_.currentStep];
+    if (isDestructive(step.command.type) && !step.approved) {
+        std::ostringstream msg;
+        msg << "PLAN_CONFIRM_REQUIRED: " << step.command.rawText << '\n'
+            << "Type 'plan proceed' to continue or 'plan abort' to cancel.";
+        return {true, msg.str(), true};
+    }
 
-std::string AIKernel::status() const {
-  std::ostringstream output;
-  output << "Port OS - Super-Nova 1.0\n";
-  output << "  AI Kernel: " << (running_ ? "running" : "stopped") << '\n';
-  output << "  Foundation: " << foundationDrivers_.summary() << '\n';
-  output << "  Sandbox: sandbox directory active\n";
-  output << "  AI Planner: "
-         << (activePlan_.active
-                 ? "plan active (" + std::to_string(activePlan_.steps.size()) +
-                       " steps)"
-                 : "idle")
-         << '\n';
-  output << "  Engine: Super-Nova 1.0 (Gemini-backed)\n";
-  output << "  Network: ready";
-  return output.str();
+    const bool previousBypass = approvalBypass_;
+    approvalBypass_ = step.approved;
+    if (step.command.type == CommandType::FsDelete && step.approved) {
+        step.command.arg2 = "yes";
+    }
+    KernelResponse resp = handleCommand(step.command);
+    approvalBypass_ = previousBypass;
+
+    log("PLAN STEP " + std::to_string(activePlan_.currentStep + 1) + '/' +
+        std::to_string(activePlan_.steps.size()),
+        step.command.rawText + " -> " + resp.message);
+
+    ++activePlan_.currentStep;
+
+    if (activePlan_.currentStep >= activePlan_.steps.size()) {
+        activePlan_.active = false;
+        resp.message += "\n\nPlan complete. All steps executed.";
+        return resp;
+    }
+
+    // If the next step is destructive, pause and request confirmation
+    const auto& next = activePlan_.steps[activePlan_.currentStep];
+    if (isDestructive(next.command.type)) {
+        std::ostringstream msg;
+        msg << resp.message << "\n\nStep " << (activePlan_.currentStep + 1)
+            << '/' << activePlan_.steps.size() << ":\n"
+            << "  PLAN_CONFIRM_REQUIRED: " << next.command.rawText << '\n'
+            << "Type 'plan proceed' to continue or 'plan abort' to cancel.";
+        resp.message = msg.str();
+        resp.requiresConfirmation = true;
+        return resp;
+    }
+
+    return executeNextStep();
 }
 
-} // namespace fox
+KernelResponse AIKernel::handleCommand(const Command& cmd) {
+    if (!running_ && cmd.type != CommandType::Exit) {
+        return {false, "AI Kernel is not running."};
+    }
+
+    if (isDestructive(cmd.type) && !approvalBypass_) {
+        pendingCommand_ = cmd;
+        return {true, "CONFIRM_REQUIRED: " + cmd.rawText, true};
+    }
+
+    switch (cmd.type) {
+
+    case CommandType::Help:
+        return {true,
+            "Port OS - Super-Nova 2.0 AI Kernel\n"
+            "Commands:\n"
+            "  help                     Show this help\n"
+            "  status                   Kernel status\n"
+            "  fs list [path]           List files (alias: ls)\n"
+            "  fs read <file>           Read a file (alias: cat)\n"
+            "  fs write <file> <text>   Write to a file\n"
+            "  fs delete <file>         Delete (moves to Trash)\n"
+            "  fs mkdir <dir>           Create directory\n"
+            "  fs rename <old> <new>    Rename\n"
+            "  fs trash                 List Trash Bin\n"
+            "  fs empty-trash           Empty Trash Bin\n"
+            "  net download <url> <dst> Download a file\n"
+            "  sys execute <path> [arg] Execute a program\n"
+            "  plan proceed             Approve next plan step\n"
+            "  plan abort               Cancel current plan\n"
+            "  exit                     Shut down Port OS\n"
+            "\nOr just type naturally — Super-Nova 2.0 will understand."};
+
+    case CommandType::Status:
+        return {true, status()};
+
+    case CommandType::FoundationInstall:
+        drivers_->installAll();
+        log("CMD", "/port ans-install-fd");
+        return {true,
+            "Foundation drivers installed.\n\n" + drivers_->detailedReport() +
+            "\nThese are Port virtual drivers."};
+
+    case CommandType::Prompt: {
+        const std::string& prompt = cmd.rawText;
+        log("ASK", prompt);
+
+        std::string planText;
+        std::string providerWarning;
+        if (aiAdapter_) {
+            planText = aiAdapter_->requestPlan(prompt);
+            if (planText.empty()) providerWarning = aiAdapter_->lastError();
+        }
+
+        // Offline fallback if no adapter or empty result
+        if (planText.empty() || planText == "unknown") {
+            // Simple keyword-based offline planner
+            std::string p = prompt;
+            std::transform(p.begin(), p.end(), p.begin(), ::tolower);
+            if (p.find("list") != std::string::npos || p.find("ls") != std::string::npos)
+                planText = "fs list";
+            else
+                planText = "fs list";
+        }
+
+        log("AI PLAN", planText);
+        buildPlan(prompt, planText);
+
+        if (activePlan_.steps.empty()) {
+            activePlan_.active = false;
+            return {false, "AI returned an empty plan."};
+        }
+
+        std::ostringstream msg;
+        msg << "Plan with " << activePlan_.steps.size() << " step(s):\n";
+        for (std::size_t i = 0; i < activePlan_.steps.size(); ++i) {
+            msg << "  " << (i + 1) << ". " << activePlan_.steps[i].command.rawText << '\n';
+        }
+        if (!providerWarning.empty()) {
+            msg << "\nOnline AI unavailable; using offline fallback: "
+                << providerWarning << '\n';
+        }
+
+        const auto& first = activePlan_.steps[0];
+        if (isDestructive(first.command.type)) {
+            msg << "\nStep 1/" << activePlan_.steps.size() << ":\n"
+                << "  PLAN_CONFIRM_REQUIRED: " << first.command.rawText << '\n'
+                << "Type 'plan proceed' to continue or 'plan abort' to cancel.";
+            return {true, msg.str(), true};
+        }
+
+        auto stepResp = executeNextStep();
+        msg << '\n' << stepResp.message;
+        return {stepResp.ok, msg.str(), stepResp.requiresConfirmation};
+    }
+
+    case CommandType::PlanProceed:
+        if (!activePlan_.active) return {false, "No active plan to proceed with."};
+        log("PLAN", "proceed");
+        activePlan_.steps[activePlan_.currentStep].approved = true;
+        return executeNextStep();
+
+    case CommandType::PlanAbort:
+        if (!activePlan_.active) return {false, "No active plan to abort."};
+        activePlan_.active = false;
+        log("PLAN", "aborted");
+        return {true, "Plan aborted."};
+
+    case CommandType::FsList: {
+        auto res = sandbox_.list(cmd.arg1);
+        if (!res) return {false, "Error: " + res.error().detail};
+        std::ostringstream oss;
+        oss << "sandbox/" << cmd.arg1 << ":\n";
+        for (const auto& e : *res) {
+            oss << "  " << e.name;
+            if (e.isDirectory) oss << '/';
+            oss << '\n';
+        }
+        if (res->empty()) oss << "  (empty)\n";
+        port::security::AuditLog::instance().record(
+            port::security::AuditAction::FsRead, cmd.arg1, true);
+        return {true, oss.str()};
+    }
+
+    case CommandType::FsRead: {
+        if (cmd.arg1.empty()) return {false, "fs read requires a filename."};
+        auto res = sandbox_.read(cmd.arg1);
+        if (!res) return {false, "Error: " + res.error().detail};
+        port::security::AuditLog::instance().record(
+            port::security::AuditAction::FsRead, cmd.arg1, true);
+        return {true, *res};
+    }
+
+    case CommandType::FsWrite: {
+        if (cmd.arg1.empty()) return {false, "fs write requires a filename."};
+        auto res = sandbox_.write(cmd.arg1, cmd.arg2);
+        if (!res) return {false, "Error: " + res.error().detail};
+        port::security::AuditLog::instance().record(
+            port::security::AuditAction::FsWrite, cmd.arg1, true);
+        return {true, "File '" + cmd.arg1 + "' written."};
+    }
+
+    case CommandType::FsDelete: {
+        if (cmd.arg1.empty()) return {false, "fs delete requires a filename."};
+        if (cmd.arg2 == "yes") {
+            auto res = sandbox_.moveToTrash(cmd.arg1);
+            if (!res) return {false, "Error: " + res.error().detail};
+            port::security::AuditLog::instance().record(
+                port::security::AuditAction::FsTrash, cmd.arg1, true);
+            return {true, "'" + cmd.arg1 + "' moved to Trash."};
+        }
+        return {true, "CONFIRM_REQUIRED: " + cmd.arg1, true};
+    }
+
+    case CommandType::FsMakeDir: {
+        if (cmd.arg1.empty()) return {false, "fs mkdir requires a directory name."};
+        auto res = sandbox_.makeDir(cmd.arg1);
+        if (!res) return {false, "Error: " + res.error().detail};
+        return {true, "Directory '" + cmd.arg1 + "' created."};
+    }
+
+    case CommandType::FsRename: {
+        if (cmd.arg1.empty() || cmd.arg2.empty())
+            return {false, "fs rename requires old and new names."};
+        auto res = sandbox_.rename(cmd.arg1, cmd.arg2);
+        if (!res) return {false, "Error: " + res.error().detail};
+        return {true, "Renamed '" + cmd.arg1 + "' → '" + cmd.arg2 + "'."};
+    }
+
+    case CommandType::FsTrash: {
+        auto res = sandbox_.listTrash();
+        if (!res) return {false, "Error: " + res.error().detail};
+        if (res->empty()) return {true, "Trash Bin is empty."};
+        std::ostringstream oss;
+        oss << "Trash Bin contents:\n";
+        for (const auto& e : *res) {
+            oss << "  " << e.name;
+            if (e.isDirectory) oss << '/';
+            oss << '\n';
+        }
+        return {true, oss.str()};
+    }
+
+    case CommandType::FsEmptyTrash: {
+        auto res = sandbox_.emptyTrash();
+        if (!res) return {false, "Error: " + res.error().detail};
+        return {true, "Trash Bin emptied."};
+    }
+
+    case CommandType::NetDownload: {
+        if (cmd.arg1.empty() || cmd.arg2.empty())
+            return {false, "net download requires URL and destination."};
+        if (!isHttpsUrl(cmd.arg1))
+            return {false, "Only HTTPS downloads are allowed."};
+
+        const auto relativeDestination = sandboxRelativePath(cmd.arg2);
+        if (relativeDestination.empty())
+            return {false, "Download destination must be a sandbox file."};
+        if (const auto parent = relativeDestination.parent_path(); !parent.empty()) {
+            auto made = sandbox_.makeDir(parent);
+            if (!made) return {false, "Error: " + made.error().detail};
+        }
+        auto destination = sandbox_.resolvePath(relativeDestination);
+        if (!destination) return {false, "Error: " + destination.error().detail};
+
+        log("NET_DOWNLOAD", cmd.arg1 + " -> " + cmd.arg2);
+
+#ifdef _WIN32
+        const HRESULT hr = URLDownloadToFileA(
+            nullptr, cmd.arg1.c_str(), destination->string().c_str(), 0, nullptr);
+        port::security::AuditLog::instance().record(
+            port::security::AuditAction::NetDownload,
+            cmd.arg1 + " -> " + relativeDestination.string(), hr == S_OK);
+        if (hr == S_OK)
+            return {true, "Downloaded into sandbox/" + relativeDestination.string()};
+        return {false, "Download failed (HRESULT " + std::to_string(hr) + ")"};
+#else
+        return {false, "Secure downloads are not implemented on this platform."};
+#endif
+    }
+
+    case CommandType::SysExecute: {
+        if (cmd.arg1.empty()) return {false, "sys execute requires a program path."};
+
+        const auto relativeProgram = sandboxRelativePath(cmd.arg1);
+        auto program = sandbox_.resolvePath(relativeProgram);
+        if (!program) return {false, "Error: " + program.error().detail};
+        std::error_code fileError;
+        if (!std::filesystem::is_regular_file(*program, fileError))
+            return {false, "Program does not exist inside the sandbox."};
+        std::string extension = program->extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+#ifdef _WIN32
+        if (extension != ".exe")
+            return {false, "Only .exe programs inside the sandbox may be executed."};
+#endif
+        if (cmd.arg2.find_first_of("\r\n") != std::string::npos)
+            return {false, "Invalid program arguments."};
+
+        log("SYS_EXECUTE", cmd.arg1 + ' ' + cmd.arg2);
+
+#ifdef _WIN32
+        HINSTANCE hInst = ShellExecuteA(
+            nullptr, "open",
+            program->string().c_str(),
+            cmd.arg2.empty() ? nullptr : cmd.arg2.c_str(),
+            sandbox_.root().string().c_str(), SW_SHOWNORMAL);
+        const bool success = reinterpret_cast<INT_PTR>(hInst) > 32;
+        port::security::AuditLog::instance().record(
+            port::security::AuditAction::SysExecute,
+            relativeProgram.string() + ' ' + cmd.arg2, success);
+        if (success)
+            return {true, "Launched: sandbox/" + relativeProgram.string()};
+        return {false, "ShellExecute failed (code " +
+                std::to_string(reinterpret_cast<INT_PTR>(hInst)) + ")"};
+#else
+        return {false, "Secure program execution is not implemented on this platform."};
+#endif
+    }
+
+    case CommandType::Exit:
+        return shutdown();
+
+    case CommandType::Unknown:
+    default:
+        return {false, "Unknown command. Type 'help' for available commands."};
+    }
+}
+
+KernelResponse AIKernel::confirmPendingCommand() {
+    if (!pendingCommand_) return {false, "No command is waiting for confirmation."};
+    Command command = std::move(*pendingCommand_);
+    pendingCommand_.reset();
+    if (command.type == CommandType::FsDelete) command.arg2 = "yes";
+    const bool previousBypass = approvalBypass_;
+    approvalBypass_ = true;
+    auto response = handleCommand(command);
+    approvalBypass_ = previousBypass;
+    return response;
+}
+
+KernelResponse AIKernel::cancelPendingCommand() {
+    if (!pendingCommand_) return {false, "No command is waiting for confirmation."};
+    pendingCommand_.reset();
+    return {true, "Command cancelled."};
+}
+
+} // namespace port::kernel
+ 

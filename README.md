@@ -1,109 +1,123 @@
-# 🌌 Port OS (Open-Source)
+# Port OS 2.0
 
-[![C++](https://img.shields.io/badge/Language-C%2B%2B11-blue.svg?style=for-the-badge&logo=c%2B%2B)](https://en.wikipedia.org/wiki/C%2B%2B11)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20Win32-0078D6.svg?style=for-the-badge&logo=windows)](https://en.wikipedia.org/wiki/Windows_API)
-[![Graphics](https://img.shields.io/badge/Graphics-GDI%2B-brightgreen.svg?style=for-the-badge)](https://en.wikipedia.org/wiki/GDI%2B)
-[![AI Engine](https://img.shields.io/badge/AI%20Engine-Super--Nova%201.0-orange.svg?style=for-the-badge)](https://github.com/google-gemini)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+**PORT Virtual Operating System — BUILD 1**
 
-**Port OS** is an experimental, **AI-Native virtual operating system application** built entirely from scratch in C++. Powered by a **robotic AI kernel** running the **Super-Nova 1.0 engine**, Port OS transforms natural language prompts into autonomous system actions within a secure, sandboxed desktop environment.
+Port OS is an experimental AI-native desktop environment for Windows, built in
+C++23 with Win32 and GDI+. It is a virtual operating environment, not a
+bare-metal operating system.
 
-Rather than being a traditional bare-metal operating system, Port OS runs as a high-performance virtual desktop environment on top of the Windows host. It is designed to demonstrate the future of **AI-first computer interfaces**, where the user interacts with the OS through a conversational search and command bar, and the robotic kernel handles the rest.
+The Super-Nova 2.0 kernel converts natural-language requests into a validated
+plan of Port commands. Commands operate through a sandboxed filesystem and
+protected actions require explicit user approval.
 
----
+## Current features
 
-## 🚀 Key Architectural Pillars
+- Native Win32/GDI+ desktop with draggable, selectable icons.
+- My Port filesystem browser, Trash Bin, and local My Server view.
+- Port Agents panel with a per-agent chat window and system prompt.
+- Gemini provider with conversational context and offline fallback planning.
+- Asynchronous AI requests so network work does not block the UI thread.
+- Sandboxed file read, write, list, rename, directory, and trash operations.
+- HTTPS downloads restricted to destinations inside the sandbox.
+- Program execution restricted to approved `.exe` files inside the sandbox.
+- Session history, audit logging, configuration, metrics, and automated tests.
 
-### 🤖 Robotic AI Kernel (Super-Nova 1.0 Engine)
-* **Autonomous Task Planning**: Converts natural language prompts (e.g., *"create a folder named Projects and download the source code"*) into step-by-step shell and filesystem operations.
-* **Live System Execution**: The robotic kernel runs commands in real-time, modifying the sandboxed filesystem dynamically.
-* **Gemini API Integration**: Built-in support for the Google Gemini API via native Windows internet sockets (`WinINet`). It loads API keys dynamically from local environment variables or `gemini_key.txt`.
-
-### 🖥️ Premium GDI+ Virtual Desktop
-* **Glassmorphic Aesthetics**: Designed with a premium, sleek dark-mode aesthetic, transparent window controls, and modern typography using high-quality anti-aliased **Segoe UI ClearType** fonts.
-* **Butter-Smooth Interactions**: Double-buffered memory device contexts (`memDC`) ensure 100% flicker-free desktop drag-selection and icon movement.
-* **Smart Grid & Dynamic Folders**: The desktop automatically scans the sandboxed `sandbox/Desktop/` directory and renders real-time folder icons. Creating or deleting folders in the sandbox updates the UI instantly without needing a manual refresh.
-* **Live Trash Bin**: Features a custom right-click context menu (*Empty Trash*, *Rename*, *Properties*) and dynamically changes its icon state (empty/full) based on sandbox contents.
-
-### 🔒 Secured Sandboxed Filesystem
-* All operations executed by the AI kernel or the user are safely contained inside a localized `sandbox/` directory, preventing any unwanted modifications to the host system.
-
----
-
-## 📂 Repository Structure
+## Architecture
 
 ```text
-├── src/
-│   ├── kernel/           # AI Kernel Core (Super-Nova 1.0 implementation)
-│   │   ├── ai_client.cpp # Google Gemini API client & offline fallback plan generator
-│   │   └── ai_kernel.cpp # Command execution routing and state machine
-│   ├── desktop/          # Win32 & GDI+ graphical desktop environment
-│   │   └── main.cpp      # Window procedures, double-buffered rendering, subclassed controls
-│   └── terminal/         # FOX-terminal console interface
-├── include/
-│   └── fox/              # Public headers (ai_kernel, ai_client, command_router)
-├── sandbox/              # Local sandboxed virtual drive (created on boot)
-├── CMakeLists.txt        # Build configuration file
-└── README.md             # Project documentation
+Port Desktop
+    |
+    v
+AI Kernel ---- approval policy ---- audit/session logs
+    |
+    +---- Prompt Runtime ---- Context Engine ---- Gemini Provider
+    |
+    +---- Command Router ---- Sandboxed tools
 ```
 
----
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the layer contract and the
+security boundaries, and [docs/ROADMAP.md](docs/ROADMAP.md) for planned work.
 
-## 🛠️ Build and Compilation Guide
+## Project layout
 
-Port OS is extremely lightweight and has **zero external package dependencies** other than standard Windows system libraries.
+```text
+Port/
+├── assets/              Images loaded at runtime
+│   ├── agents/          Per-agent icons (agent-<name>.png)
+│   ├── branding/        Wallpaper, app icon, dock logo
+│   └── icons/           Desktop and file-browser icons
+├── docs/                Architecture and roadmap
+├── include/port/        Public headers, one folder per layer
+│   ├── ai/  core/  kernel/  security/  storage/
+├── src/                 Implementation, mirroring include/port
+│   ├── ai/              Providers, context engine, prompt runtime, tools
+│   ├── core/            Event bus, logger, config, metrics, services
+│   ├── desktop/         Win32/GDI+ shell (entry point)
+│   ├── kernel/          AI kernel, command router, foundation drivers
+│   ├── security/        Sandbox and audit log
+│   └── storage/         Session store
+├── tests/               CTest suite, one executable per module
+├── tools/               Developer scripts (asset generation)
+├── CMakeLists.txt
+└── LICENSE.txt
+```
 
-### Requirements
-* **Operating System**: Windows 10 / 11
-* **Compiler**: A C++11 compliant compiler (MSVC, MinGW, or Clang)
-* **Build System**: CMake 3.20 or newer
+Everything else in the working tree — `build*/`, `sandbox/`, `tmp/`, logs and
+key files — is generated at build or run time and is not tracked by Git.
 
-### Building the Project
+## Requirements
 
-1. Open your terminal (PowerShell, Command Prompt, or Git Bash) and navigate to the project directory.
-2. Generate the build files and compile the project:
+- Windows 10 or 11
+- CMake 3.20+
+- Ninja or another CMake-supported build tool
+- A C++23 compiler, such as current MSYS2 MinGW64 or MSVC 2022
+
+## Build and run
 
 ```powershell
-# Configure the build directory
-cmake -S . -B build
-
-# Compile the executables in Release mode (recommended for maximum performance)
-cmake --build build --config Release
+cmake -S . -B build-msys -G Ninja
+cmake --build build-msys -j 4
+.\build-msys\port-desktop.exe
 ```
 
-### Running Port OS
+The executable sets its working directory to the project root, so it finds
+`assets/` whether it is started from the build directory or from a shortcut.
 
-After a successful build, you can launch the virtual desktop application:
+Run the test suite:
 
 ```powershell
-# Run the virtual desktop application
-.\build\Release\port-desktop.exe
+ctest --test-dir build-msys --output-on-failure
 ```
 
-You can also run the command-line terminal interface:
+With an MSYS2 toolchain the tests need the MinGW runtime DLLs on `PATH`:
 
 ```powershell
-# Run the terminal interface
-.\build\Release\fox-terminal.exe
+$env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
 ```
 
----
+## Enable Gemini
 
-## 🔑 Activating the AI Kernel (Google Gemini)
+The preferred configuration is an environment variable:
 
-To unlock the full potential of the **Super-Nova 1.0** robotic kernel, you can hook it up to the Gemini API:
+```powershell
+$env:GEMINI_API_KEY="your-key"
+$env:PORT_AI_MODEL="gemini-3.5-flash" # optional
+.\build-msys\port-desktop.exe
+```
 
-1. Obtain an API key from the Google AI Studio.
-2. Place the key in a file named `gemini_key.txt` in the root directory of the project, or set it as an environment variable:
-   ```powershell
-   $env:GEMINI_API_KEY="your_api_key_here"
-   ```
-3. If no API key is provided, the kernel automatically falls back to its highly optimized **offline plan compiler**, allowing you to use basic system commands without an internet connection.
+For local development, a `gemini_key.txt` file is also supported. The file is
+ignored by Git. If no key is available, Port OS uses its offline planner.
 
----
+The AI may only emit the documented Port command grammar. Unknown output is
+discarded, filesystem paths are checked against the sandbox, and write,
+download, delete, empty-trash, and execute operations require approval.
 
-## 🤝 Contributing & Star the Repo!
+## Project status
 
-Port OS is an open-source project. If you love the idea of an **AI-Native Operating System** built from scratch in pure C++, feel free to fork the repository, submit pull requests, or open issues.
+Port OS is an active prototype. The kernel, provider integration, sandbox,
+approval flow, and desktop are functional. VM integration and bare-metal OS
+research remain future work; see [docs/ROADMAP.md](docs/ROADMAP.md).
 
-**Don't forget to star ⭐ this repository if you find it interesting!**
+## License
+
+MIT — see [LICENSE.txt](LICENSE.txt).
